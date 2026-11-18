@@ -13,6 +13,9 @@ if [ -n "${CONDA_PREFIX:-}" ]; then
   unset CONDA_PREFIX CONDA_DEFAULT_ENV PYTHONHOME
 fi
 export PYTHONNOUSERSITE=1
+# 세션 기록 위치(<레포>/runs/<시각>/)와 git 커밋 기록용 레포 경로
+export CAR_DRIVE_RUNS="${CAR_DRIVE_RUNS:-$ROOT/runs}"
+export CAR_DRIVE_ROOT="$ROOT"
 
 ROS_SETUP="$(ls /opt/ros/*/setup.bash 2>/dev/null | sort | tail -1)"
 if [ -z "$ROS_SETUP" ]; then echo "ROS 2가 설치돼 있지 않음 (/opt/ros/*/setup.bash 없음)"; exit 1; fi

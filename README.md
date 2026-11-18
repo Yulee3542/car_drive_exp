@@ -31,7 +31,22 @@ cd ~/car_drive_exp && git pull && ./run.sh
 - 옵션: `./run.sh -p port:=/dev/ttyACM0 -p max_speed:=120 -p step:=10`
 - 처음 시험은 **바퀴를 띄운 채로**.
 
-## 토픽 (나중에 세션 로그가 받아 쓸 것)
+## 세션 기록 (실행할 때마다 자동)
+
+시작할 때 `● 기록 시작: …`, 끝날 때 `● 기록 저장: …`과 요약(주행 시간·키 횟수·최고 |PWM|·조향 POT 범위·보드 응답)을 터미널에 띄운다.
+
+```
+runs/<YYYYmmdd_HHMMSS>/
+  drive_log.csv    t_s,kind,value   kind = key(누른 키) · tx(보낸 명령 V<pwm>/L/R/F/G/S) · pot(조향 ADC) · state(0/1/2) · note
+  serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄)
+  session.json     시작·끝 시각, 종료 이유(q/ctrl+c/error), 포트, 설정, git 커밋, 펌웨어 해시, 요약
+```
+
+- `t_s` = 세션 시작부터의 초. `runs/`는 git에 올라가지 않는다(노트북에만 남음).
+- 연결 후 3초 동안 보드 응답(펌웨어 줄)이 없으면 **빨간 경고**를 띄우고 `note,no_board_reply`를 남긴다 — 펌웨어·baud 문제를 바로 알 수 있게.
+- 기록 끄기: `./run.sh -p record:=false` · 다른 위치: `CAR_DRIVE_RUNS=/path ./run.sh`
+
+## 토픽
 
 | 토픽 | 타입 | 내용 |
 |---|---|---|
@@ -58,7 +73,8 @@ cd ~/car_drive_exp && git pull && ./run.sh
 ```
 run.sh  flash.sh  firmware/car_controller/
 src/car_drive/car_drive/
-  wasd_drive.py   ROS 2 노드 (키보드 → 시리얼, 토픽 발행)
+  wasd_drive.py   ROS 2 노드 (키보드 → 시리얼, 토픽 발행, 세션 기록)
+  session_log.py  세션 폴더·CSV·원문·session.json
   drive.py        키 → 펌웨어 명령 (V0 → G 순서, 워치독 keepalive)
   serial_link.py  포트 찾기·연결·줄 해석
   extras/         twin_stub.py · monitor_stub.py (더미)
