@@ -28,6 +28,7 @@ from std_msgs.msg import Int8, Int16, Int32, String
 from car_drive.drive import KEYS_HELP, Drive
 from car_drive.serial_link import BAUD, SerialLink, find_port, parse_line
 from car_drive.session_log import SessionLog
+from car_drive.video_recorder import VideoRecorder, camera_name, find_camera
 
 BOARD_REPLY_TIMEOUT_S = 3.0   # 펌웨어는 50 ms마다 P 줄을 보낸다 — 3초 동안 한 줄도 없으면 통신 실패
 KEY_NAMES = {" ": "space", "\x03": "ctrl+c", "\x04": "ctrl+d", "\x1b": "esc", "\n": "enter"}
@@ -79,8 +80,12 @@ class WasdDrive(Node):
         self.declare_parameter("keepalive_hz", 10.0)
         self.declare_parameter("record", True)
         self.declare_parameter("runs_dir", os.environ.get("CAR_DRIVE_RUNS", "~/car_drive_runs"))
+        self.declare_parameter("camera", "auto")          # auto = 이름에 C920 · none · /dev/videoN
+        self.declare_parameter("video_size", "1280x720")
+        self.declare_parameter("video_fps", 30)
         p = {n: self.get_parameter(n).value for n in
-             ("port", "baud", "step", "max_speed", "keepalive_hz", "record", "runs_dir")}
+             ("port", "baud", "step", "max_speed", "keepalive_hz", "record", "runs_dir",
+              "camera", "video_size", "video_fps")}
 
         port = p["port"] or find_port()
         if not port:
@@ -91,12 +96,17 @@ class WasdDrive(Node):
             self.log = SessionLog(p["runs_dir"], repo_root=os.environ.get("CAR_DRIVE_ROOT"),
                                   meta={"port": port, "params": p})
             print(f"● 기록 시작: {self.log.dir}", flush=True)
+        self.video = None
+        if p["record"] and p["camera"] != "none":
+            self._start_video(p)
 
         self.get_logger().info(f"{port} 연결 중 (보드 리셋 2초 대기)")
         try:
             self.serial = SerialLink(port, p["baud"])
-        except Exception as e:      # 권한(dialout)·장치 사용 중 — 실패한 실행도 세션에 이유를 남긴다
-            meta = self.log.close(f"error: {e}")
+        except BaseException as e:  # 권한(dialout)·장치 사용 중·연결 대기 중 Ctrl+C — 실패한 실행도 세션에 이유를 남긴다
+            if self.video is not None:      # ffmpeg가 혼자 남아 카메라를 붙잡지 않게
+                self.log.set_meta("video", self.video.stop())
+            meta = self.log.close(f"error: {e!r}" if not isinstance(e, KeyboardInterrupt) else "ctrl+c")
             if meta:
                 print(f"● 기록 저장(실패한 실행): {self.log.dir}", flush=True)
             raise
@@ -117,8 +127,26 @@ class WasdDrive(Node):
         self._reply_timer = self.create_timer(BOARD_REPLY_TIMEOUT_S, self._check_board_reply)
         self.get_logger().info(f"포트 열림 · 주행 허용 보냄 · 최고 속도 {self.drive.max_speed} · 보드 응답 확인 중")
 
+    def _start_video(self, p):
+        if p["camera"] == "auto":
+            dev, name = find_camera("c920")
+        else:
+            dev, name = p["camera"], camera_name(p["camera"])
+        if dev is None:
+            self.log.set_meta("video", {"status": "no_camera"})
+            self.get_logger().warn("C920을 못 찾음 → 영상 없이 기록 (다른 카메라: -p camera:=/dev/videoN)")
+            return
+        self.video = VideoRecorder(self.log.dir, dev, self.log.t0_epoch,
+                                   size=p["video_size"], fps=int(p["video_fps"]))
+        print(f"● 영상 녹화: {dev} ({name}) {p['video_size']}@{p['video_fps']} → video.mkv", flush=True)
+
     def _check_board_reply(self):
         self._reply_timer.cancel()
+        if self.video is not None:
+            err = self.video.error_if_dead()
+            if err:
+                self.log.event("note", "video_failed")
+                self.get_logger().error(f"영상 녹화 실패 — 주행·기록은 계속: {err.splitlines()[-1]}")
         if self._first_rx.is_set():
             self.get_logger().info("보드 응답 확인 (펌웨어 줄 수신 중)")
         else:
@@ -197,6 +225,16 @@ def _print_summary(meta):
           f"  주행 {s.get('duration_s', 0):.0f}초 · 키 {s.get('keys')}번 · 최고 |PWM| {s.get('max_abs_pwm')} · "
           f"조향 POT {pot} ({s.get('pot_samples')}개) · 보드 {reply} · 종료 {meta.get('end_reason')}\n"
           f"  파일: drive_log.csv · serial_raw.log · session.json", flush=True)
+    v = meta.get("video")
+    if not v:
+        return
+    if v.get("frames"):
+        print(f"  영상: video.mkv {v['frames']}프레임 · {v.get('fps_measured')} fps · {v.get('size_mb')} MB "
+              f"· 첫 프레임 t={v.get('first_frame_t_s')}s · 프레임 시각 video_frames.csv", flush=True)
+    elif v.get("status") == "no_camera":
+        print("  영상: 없음 (C920 미연결)", flush=True)
+    else:
+        print(f"  영상: 실패 ⚠ {'; '.join(v.get('ffmpeg_errors', []))}", flush=True)
 
 
 def main(args=None):
@@ -228,6 +266,8 @@ def main(args=None):
             if hasattr(node, "serial"):
                 node.shutdown()     # V0 · F · S — 차를 세우고 주행 게이트를 닫는다
                 print("정지 명령 보냄 · 종료")
+            if getattr(node, "video", None) is not None:
+                node.log.set_meta("video", node.video.stop())
             meta = node.log.close(reason)
             if meta:
                 _print_summary(dict(meta, _dir=node.log.dir))

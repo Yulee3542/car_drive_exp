@@ -52,6 +52,7 @@ class SessionLog:
         os.makedirs(path)
         self.dir = path
         self._t0 = time.monotonic()
+        self.t0_epoch = time.time()     # t_s=0 인 순간의 벽시계 — 영상 프레임(벽시계 기록)을 t_s로 바꿀 때 쓴다
         self._lock = threading.Lock()
         self._csv_f = open(os.path.join(path, "drive_log.csv"), "w", newline="", encoding="utf-8")
         self._csv = csv.writer(self._csv_f, lineterminator="\n")   # 기본 \r\n이면 grep '…$'가 안 맞는다
@@ -68,6 +69,7 @@ class SessionLog:
         self.meta = {
             "session": os.path.basename(path),
             "start": start.isoformat(timespec="seconds"),
+            "t0_epoch": round(self.t0_epoch, 6),
             "end": None,
             "host": socket.gethostname(),
             "git_commit": _git_commit(repo_root),
@@ -134,6 +136,14 @@ class SessionLog:
                     pass
         self._write_json()
         return self.meta
+
+    def set_meta(self, key, value):
+        """session.json에 항목 추가(영상 정보 등) — 닫기 전이면 close()가 같이 저장한다."""
+        with self._lock:
+            self.meta[key] = value
+            closed = self._closed
+        if closed:
+            self._write_json()
 
     def flush(self):
         with self._lock:
