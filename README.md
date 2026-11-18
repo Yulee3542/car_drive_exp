@@ -51,6 +51,8 @@ runs/<YYYYmmdd_HHMMSS>/
   - 카메라는 이름(C920)으로만 고른다. 없으면 노트북 내장 캠으로 바꾸지 않고 영상 없이 기록한다.
   - 다른 카메라: `-p camera:=/dev/video0` · 끄기: `-p camera:=none` · 해상도: `-p video_size:=640x480`
   - 용량: 1280×720 MJPEG ≈ **분당 240 MB** — 오래 돌릴 땐 해상도를 낮추거나 runs/를 옮길 것
+  - 재생(노트북): `ffplay runs/<세션>/video.mkv` (스페이스 일시정지 · ←/→ 10초 이동 · q 닫기).
+    더블클릭으로 열려면 플레이어 설치: `sudo apt install -y mpv` (기본 앱 Totem은 설치돼 있지 않음)
 - 연결 후 3초 동안 보드 응답(펌웨어 줄)이 없으면 **빨간 경고**를 띄우고 `note,no_board_reply`를 남긴다 — 펌웨어·baud 문제를 바로 알 수 있게.
 - 기록 끄기: `./run.sh -p record:=false` · 다른 위치: `CAR_DRIVE_RUNS=/path ./run.sh`
 
