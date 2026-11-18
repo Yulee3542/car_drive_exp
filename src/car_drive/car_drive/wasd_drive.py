@@ -16,7 +16,7 @@ import threading
 import tty
 
 import rclpy
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import Int8, Int16, Int32, String
 
@@ -120,25 +120,40 @@ def main(args=None):
         print("키보드 입력이 필요함 — 터미널에서 직접 실행 (./run.sh)", file=sys.stderr)
         return 1
     rclpy.init(args=args)
-    node = None
+    node, executor, spin, code = None, None, None, 0
     try:
         node = WasdDrive()
-        spin = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+        executor = SingleThreadedExecutor()
+        executor.add_node(node)
+        spin = threading.Thread(target=_spin, args=(executor,), daemon=True)
         spin.start()
         _keyboard_loop(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
+    except KeyboardInterrupt:
         pass
     except Exception as e:      # 포트 없음 · 권한(dialout) · 장치 사용 중
         print(f"[wasd_drive] {e}", file=sys.stderr)
-        return 1
+        code = 1
     finally:
+        # 순서: spin(keepalive 타이머) 정지 → 정지 명령 → 시리얼 닫기 → 노드 정리.
+        # spin이 도는 채로 노드를 없애면 C++ 쪽이 abort하고, 정지 뒤에 keepalive가 끼어들 수 있다.
+        if executor is not None:
+            executor.shutdown(timeout_sec=1.0)
+        if spin is not None:
+            spin.join(timeout=2.0)
         if node is not None:
             node.shutdown()     # V0 · F · S — 차를 세우고 주행 게이트를 닫는다
             print("정지 명령 보냄 · 종료")
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-    return 0
+    return code
+
+
+def _spin(executor):
+    try:
+        executor.spin()
+    except (ExternalShutdownException, KeyboardInterrupt):
+        pass
 
 
 if __name__ == "__main__":
