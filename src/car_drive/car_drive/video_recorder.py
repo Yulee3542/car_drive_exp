@@ -9,6 +9,7 @@ t_s에는 카메라·USB 지연(수십 ms)이 들어 있다.
 """
 import glob
 import os
+import re
 import signal
 import subprocess
 
@@ -35,15 +36,25 @@ def camera_name(device, sys_root="/sys/class/video4linux"):
         return None
 
 
-def frames_from_timestamps(ts_text, t0_epoch):
-    """mkvtimestamp_v2 본문(ms 한 줄씩) → [(frame, t_s)]."""
+_START_RE = re.compile(r"Input #0, video4linux2.*?start:\s*([0-9.]+)", re.S)
+
+
+def input_start_epoch(ffmpeg_log):
+    """ffmpeg info 로그의 'Input #0, video4linux2 … start: 1795014797.758000' → 첫 프레임 벽시계(초). 없으면 None."""
+    m = _START_RE.search(ffmpeg_log)
+    return float(m.group(1)) if m else None
+
+
+def frames_from_timestamps(ts_text, t0_epoch, start_epoch=0.0):
+    """mkvtimestamp_v2 본문(영상 시작부터 ms, 한 줄씩) → [(frame, t_s)].
+    t_s = start_epoch + ms/1000 − t0_epoch (start_epoch = 첫 프레임 벽시계)."""
     out = []
     for line in ts_text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         try:
-            out.append((len(out), round(float(line) / 1000.0 - t0_epoch, 3)))
+            out.append((len(out), round(start_epoch + float(line) / 1000.0 - t0_epoch, 3)))
         except ValueError:
             continue
     return out
@@ -55,11 +66,13 @@ class VideoRecorder:
         self.info = {"device": device, "name": camera_name(device), "size": size, "fps_requested": fps,
                      "input_format": input_format, "file": "video.mkv", "frames_csv": "video_frames.csv"}
         self._err = open(os.path.join(session_dir, "video_ffmpeg.log"), "w")
-        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+        # 영상 파일은 0초부터(-copyts를 쓰면 재생 시간이 epoch 기준 수십만 시간으로 나온다).
+        # 첫 프레임의 벽시계는 ffmpeg가 info 로그에 "start: <epoch>"로 찍는다 → stop()에서 읽어 t_s로 바꾼다.
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info", "-nostats", "-nostdin",
                "-f", "v4l2", "-input_format", input_format, "-framerate", str(fps), "-video_size", size,
                "-use_wallclock_as_timestamps", "1", "-i", device,
-               "-map", "0:v", "-c:v", "copy", "-copyts", "-f", "matroska", os.path.join(session_dir, "video.mkv"),
-               "-map", "0:v", "-c:v", "copy", "-copyts", "-f", "mkvtimestamp_v2", os.path.join(session_dir, FFMPEG_TS)]
+               "-map", "0:v", "-c:v", "copy", "-f", "matroska", os.path.join(session_dir, "video.mkv"),
+               "-map", "0:v", "-c:v", "copy", "-f", "mkvtimestamp_v2", os.path.join(session_dir, FFMPEG_TS)]
         self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=self._err)
 
     def error_if_dead(self):
@@ -87,8 +100,10 @@ class VideoRecorder:
         self._err.close()
         ts_path = os.path.join(self.dir, FFMPEG_TS)
         frames = []
-        if os.path.exists(ts_path):
-            frames = frames_from_timestamps(open(ts_path).read(), self.t0_epoch)
+        start = input_start_epoch(self._read_err())
+        self.info["first_frame_epoch"] = start
+        if os.path.exists(ts_path) and start is not None:
+            frames = frames_from_timestamps(open(ts_path).read(), self.t0_epoch, start)
             with open(os.path.join(self.dir, "video_frames.csv"), "w") as f:
                 f.write("frame,t_s\n")
                 f.writelines(f"{i},{t:.3f}\n" for i, t in frames)
@@ -100,8 +115,9 @@ class VideoRecorder:
         span = (frames[-1][1] - frames[0][1]) if len(frames) > 1 else 0
         self.info["fps_measured"] = round((len(frames) - 1) / span, 2) if span > 0 else None
         self.info["size_mb"] = round(os.path.getsize(mkv) / 1e6, 1) if os.path.exists(mkv) else 0
-        # 정지 신호를 받을 때마다 나오는 무해한 줄은 뺀다
-        err = [l for l in self._read_err().splitlines() if l.strip() and "VIDIOC_QBUF" not in l]
+        # 로그는 info 수준(스트림 정보 포함) — 오류처럼 보이는 줄만 고르고, 정지 때마다 나오는 무해한 줄은 뺀다
+        err = [l for l in self._read_err().splitlines()
+               if re.search(r"error|failed|invalid|busy|cannot|no such", l, re.I) and "VIDIOC_QBUF" not in l]
         if err:
             self.info["ffmpeg_errors"] = err[-3:]
         return self.info

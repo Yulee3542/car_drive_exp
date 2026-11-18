@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from car_drive.video_recorder import find_camera, frames_from_timestamps  # noqa: E402
+from car_drive.video_recorder import find_camera, frames_from_timestamps, input_start_epoch  # noqa: E402
 
 
 def _cam(root, n, name, index):
@@ -34,5 +34,15 @@ def test_find_camera_numeric_order(tmp_path):
 
 
 def test_frames_from_timestamps():
-    text = "# timecode format v2\n1000002500\n1000002533\n\n1000002567\n"
-    assert frames_from_timestamps(text, 1000000.0) == [(0, 2.5), (1, 2.533), (2, 2.567)]
+    # 영상은 0 ms부터, 첫 프레임 벽시계 = 1000002.5, 세션 t0 = 1000000.0
+    text = "# timecode format v2\n0\n33\n\n67\n"
+    assert frames_from_timestamps(text, 1000000.0, 1000002.5) == [(0, 2.5), (1, 2.533), (2, 2.567)]
+
+
+def test_input_start_epoch_from_ffmpeg_log():
+    log = ("Input #0, video4linux2,v4l2, from '/dev/video0':\n"
+           "  Duration: N/A, start: 1795014797.758000, bitrate: N/A\n"
+           "  Stream #0:0: Video: mjpeg (Baseline), yuvj422p(pc), 1280x720, 30 fps\n"
+           "Output #0, matroska, to 'video.mkv':\n  Duration: N/A, start: 0.000000\n")
+    assert input_start_epoch(log) == 1795014797.758
+    assert input_start_epoch("[video4linux2] Cannot open video device") is None
