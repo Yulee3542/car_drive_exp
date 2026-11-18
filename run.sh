@@ -13,8 +13,8 @@ if [ -n "${CONDA_PREFIX:-}" ]; then
   unset CONDA_PREFIX CONDA_DEFAULT_ENV PYTHONHOME
 fi
 export PYTHONNOUSERSITE=1
-# 세션 기록 위치(<레포>/runs/<시각>/)와 git 커밋 기록용 레포 경로
-export CAR_DRIVE_RUNS="${CAR_DRIVE_RUNS:-$ROOT/runs}"
+# 세션 기록 위치(<레포>/log/<시각>_*, 폴더 안 나눔)와 git 커밋 기록용 레포 경로
+export CAR_DRIVE_LOG="${CAR_DRIVE_LOG:-$ROOT/log}"
 export CAR_DRIVE_ROOT="$ROOT"
 
 ROS_SETUP="$(ls /opt/ros/*/setup.bash 2>/dev/null | sort | tail -1)"
@@ -40,7 +40,8 @@ done
 cd "$ROOT" || exit 1
 mkdir -p "$ROOT/log"
 echo "[run] 빌드 중 ($(basename "$(dirname "$ROS_SETUP")"))"
-if ! colcon build --symlink-install --packages-select car_drive > "$ROOT/log/last_build.txt" 2>&1; then
+# colcon 자체 로그(build_<시각>/ 폴더)는 남기지 않는다 — log/에는 세션 파일과 last_build.txt만
+if ! colcon --log-base /dev/null build --symlink-install --packages-select car_drive > "$ROOT/log/last_build.txt" 2>&1; then
   cat "$ROOT/log/last_build.txt"; echo "[run] 빌드 실패"; exit 1
 fi
 # shellcheck disable=SC1091

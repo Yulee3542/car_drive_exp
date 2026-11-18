@@ -4,8 +4,8 @@
   ros2 run car_drive wasd_drive --ros-args -p port:=/dev/ttyACM0 -p max_speed:=120
 
 실행할 때마다 세션 폴더 하나에 기록한다 (session_log.py, 끄려면 -p record:=false):
-  <runs_dir>/<YYYYmmdd_HHMMSS>/ drive_log.csv · serial_raw.log · session.json
-  runs_dir 기본 = $CAR_DRIVE_RUNS (run.sh가 <레포>/runs로 설정) 또는 ~/car_drive_runs
+  <log_dir>/<YYYYmmdd_HHMMSS>_drive_log.csv · _serial_raw.log · _session.json (+ _video.mkv · _video_frames.csv)
+  log_dir 기본 = $CAR_DRIVE_LOG (run.sh가 <레포>/log로 설정 — 폴더를 나누지 않음) 또는 ~/car_drive_exp/log
 
 발행:
   /car/pwm            Int16   지금 보내는 속도 명령(-255..255, 음수=후진)
@@ -79,12 +79,12 @@ class WasdDrive(Node):
         self.declare_parameter("max_speed", 150)
         self.declare_parameter("keepalive_hz", 10.0)
         self.declare_parameter("record", True)
-        self.declare_parameter("runs_dir", os.environ.get("CAR_DRIVE_RUNS", "~/car_drive_runs"))
+        self.declare_parameter("log_dir", os.environ.get("CAR_DRIVE_LOG", "~/car_drive_exp/log"))
         self.declare_parameter("camera", "auto")          # auto = 이름에 C920 · none · /dev/videoN
         self.declare_parameter("video_size", "1280x720")
         self.declare_parameter("video_fps", 30)
         p = {n: self.get_parameter(n).value for n in
-             ("port", "baud", "step", "max_speed", "keepalive_hz", "record", "runs_dir",
+             ("port", "baud", "step", "max_speed", "keepalive_hz", "record", "log_dir",
               "camera", "video_size", "video_fps")}
 
         port = p["port"] or find_port()
@@ -93,9 +93,9 @@ class WasdDrive(Node):
 
         self.log = _NullLog()
         if p["record"]:
-            self.log = SessionLog(p["runs_dir"], repo_root=os.environ.get("CAR_DRIVE_ROOT"),
+            self.log = SessionLog(p["log_dir"], repo_root=os.environ.get("CAR_DRIVE_ROOT"),
                                   meta={"port": port, "params": p})
-            print(f"● 기록 시작: {self.log.dir}", flush=True)
+            print(f"● 기록 시작: {self.log.prefix}_*  (세션 {self.log.name})", flush=True)
         self.video = None
         if p["record"] and p["camera"] != "none":
             self._start_video(p)
@@ -108,7 +108,7 @@ class WasdDrive(Node):
                 self.log.set_meta("video", self.video.stop())
             meta = self.log.close(f"error: {e!r}" if not isinstance(e, KeyboardInterrupt) else "ctrl+c")
             if meta:
-                print(f"● 기록 저장(실패한 실행): {self.log.dir}", flush=True)
+                print(f"● 기록 저장(실패한 실행): {self.log.path('session.json')}", flush=True)
             raise
 
         self.pub_pwm = self.create_publisher(Int16, "/car/pwm", 10)
@@ -136,9 +136,9 @@ class WasdDrive(Node):
             self.log.set_meta("video", {"status": "no_camera"})
             self.get_logger().warn("C920을 못 찾음 → 영상 없이 기록 (다른 카메라: -p camera:=/dev/videoN)")
             return
-        self.video = VideoRecorder(self.log.dir, dev, self.log.t0_epoch,
+        self.video = VideoRecorder(self.log.prefix, dev, self.log.t0_epoch,
                                    size=p["video_size"], fps=int(p["video_fps"]))
-        print(f"● 영상 녹화: {dev} ({name}) {p['video_size']}@{p['video_fps']} → video.mkv", flush=True)
+        print(f"● 영상 녹화: {dev} ({name}) {p['video_size']}@{p['video_fps']} → {self.log.name}_video.mkv", flush=True)
 
     def _check_board_reply(self):
         self._reply_timer.cancel()
@@ -221,16 +221,17 @@ def _print_summary(meta):
     s = meta.get("summary", {})
     pot = f"{s.get('pot_min')}~{s.get('pot_max')}" if s.get("pot_samples") else "없음"
     reply = f"{s['first_board_reply_s']:.1f}초에 첫 응답" if s.get("first_board_reply_s") is not None else "응답 없음 ⚠"
-    print(f"● 기록 저장: {meta['_dir']}\n"
+    n = meta["session"]
+    print(f"● 기록 저장: {meta['_dir']}/{n}_*\n"
           f"  주행 {s.get('duration_s', 0):.0f}초 · 키 {s.get('keys')}번 · 최고 |PWM| {s.get('max_abs_pwm')} · "
           f"조향 POT {pot} ({s.get('pot_samples')}개) · 보드 {reply} · 종료 {meta.get('end_reason')}\n"
-          f"  파일: drive_log.csv · serial_raw.log · session.json", flush=True)
+          f"  파일: {n}_drive_log.csv · {n}_serial_raw.log · {n}_session.json", flush=True)
     v = meta.get("video")
     if not v:
         return
     if v.get("frames"):
-        print(f"  영상: video.mkv {v['frames']}프레임 · {v.get('fps_measured')} fps · {v.get('size_mb')} MB "
-              f"· 첫 프레임 t={v.get('first_frame_t_s')}s · 프레임 시각 video_frames.csv", flush=True)
+        print(f"  영상: {v.get('file')} {v['frames']}프레임 · {v.get('fps_measured')} fps · {v.get('size_mb')} MB "
+              f"· 첫 프레임 t={v.get('first_frame_t_s')}s · 프레임 시각 {v.get('frames_csv')}", flush=True)
     elif v.get("status") == "no_camera":
         print("  영상: 없음 (C920 미연결)", flush=True)
     else:

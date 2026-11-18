@@ -61,19 +61,24 @@ def frames_from_timestamps(ts_text, t0_epoch, start_epoch=0.0):
 
 
 class VideoRecorder:
-    def __init__(self, session_dir, device, t0_epoch, size="1280x720", fps=30, input_format="mjpeg"):
-        self.dir, self.device, self.t0_epoch = session_dir, device, t0_epoch
+    def __init__(self, prefix, device, t0_epoch, size="1280x720", fps=30, input_format="mjpeg"):
+        """prefix = <log>/<세션> — 파일은 <세션>_video.mkv · _video_frames.csv · _video_ffmpeg.log"""
+        self.prefix, self.device, self.t0_epoch = prefix, device, t0_epoch
         self.info = {"device": device, "name": camera_name(device), "size": size, "fps_requested": fps,
-                     "input_format": input_format, "file": "video.mkv", "frames_csv": "video_frames.csv"}
-        self._err = open(os.path.join(session_dir, "video_ffmpeg.log"), "w")
+                     "input_format": input_format, "file": os.path.basename(self._p("video.mkv")),
+                     "frames_csv": os.path.basename(self._p("video_frames.csv"))}
+        self._err = open(self._p("video_ffmpeg.log"), "w")
         # 영상 파일은 0초부터(-copyts를 쓰면 재생 시간이 epoch 기준 수십만 시간으로 나온다).
         # 첫 프레임의 벽시계는 ffmpeg가 info 로그에 "start: <epoch>"로 찍는다 → stop()에서 읽어 t_s로 바꾼다.
         cmd = ["ffmpeg", "-hide_banner", "-loglevel", "info", "-nostats", "-nostdin",
                "-f", "v4l2", "-input_format", input_format, "-framerate", str(fps), "-video_size", size,
                "-use_wallclock_as_timestamps", "1", "-i", device,
-               "-map", "0:v", "-c:v", "copy", "-f", "matroska", os.path.join(session_dir, "video.mkv"),
-               "-map", "0:v", "-c:v", "copy", "-f", "mkvtimestamp_v2", os.path.join(session_dir, FFMPEG_TS)]
+               "-map", "0:v", "-c:v", "copy", "-f", "matroska", self._p("video.mkv"),
+               "-map", "0:v", "-c:v", "copy", "-f", "mkvtimestamp_v2", self._p(FFMPEG_TS)]
         self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=self._err)
+
+    def _p(self, suffix):
+        return f"{self.prefix}_{suffix}"
 
     def error_if_dead(self):
         """ffmpeg가 이미 끝났으면 오류 문자열(카메라 사용 중·형식 미지원 등), 녹화 중이면 None. 막지 않는다."""
@@ -84,12 +89,12 @@ class VideoRecorder:
 
     def _read_err(self):
         try:
-            return open(os.path.join(self.dir, "video_ffmpeg.log")).read().strip()
+            return open(self._p("video_ffmpeg.log")).read().strip()
         except OSError:
             return ""
 
     def stop(self):
-        """녹화를 끝내고 video_frames.csv를 만든다. session.json에 넣을 정보를 돌려준다."""
+        """녹화를 끝내고 <세션>_video_frames.csv를 만든다. session.json에 넣을 정보를 돌려준다."""
         if self._proc.poll() is None:
             self._proc.send_signal(signal.SIGINT)        # mkv를 정상적으로 닫게
             try:
@@ -98,17 +103,17 @@ class VideoRecorder:
                 self._proc.kill()
                 self._proc.wait()
         self._err.close()
-        ts_path = os.path.join(self.dir, FFMPEG_TS)
+        ts_path = self._p(FFMPEG_TS)
         frames = []
         start = input_start_epoch(self._read_err())
         self.info["first_frame_epoch"] = start
         if os.path.exists(ts_path) and start is not None:
             frames = frames_from_timestamps(open(ts_path).read(), self.t0_epoch, start)
-            with open(os.path.join(self.dir, "video_frames.csv"), "w") as f:
+            with open(self._p("video_frames.csv"), "w") as f:
                 f.write("frame,t_s\n")
                 f.writelines(f"{i},{t:.3f}\n" for i, t in frames)
             os.remove(ts_path)
-        mkv = os.path.join(self.dir, "video.mkv")
+        mkv = self._p("video.mkv")
         self.info["frames"] = len(frames)
         self.info["first_frame_t_s"] = frames[0][1] if frames else None
         self.info["last_frame_t_s"] = frames[-1][1] if frames else None

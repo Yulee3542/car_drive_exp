@@ -1,9 +1,8 @@
-"""세션별 주행 로그 — 실행 한 번 = 폴더 하나.
+"""세션별 주행 로그 — 폴더를 나누지 않고 한 로그 폴더에, 파일 이름 앞에 세션 시각을 붙인다.
 
-  <runs>/<YYYYmmdd_HHMMSS>/
-    drive_log.csv    t_s,kind,value   (kind: key · tx · pot · state · note)
-    serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄) — 펌웨어가 바뀌어도 다시 해석할 수 있게
-    session.json     시작/끝 시각·포트·설정·git 커밋·펌웨어 해시·요약 (시작 때 한 번, 끝날 때 갱신)
+  <log>/<YYYYmmdd_HHMMSS>_drive_log.csv    t_s,kind,value   (kind: key · tx · pot · state · note)
+  <log>/<YYYYmmdd_HHMMSS>_serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄) — 펌웨어가 바뀌어도 다시 해석
+  <log>/<YYYYmmdd_HHMMSS>_session.json     시작/끝 시각·포트·설정·git 커밋·펌웨어 해시·요약 (시작 때, 끝날 때 갱신)
 
 t_s = 세션 시작부터의 초(단조 시계). 여러 스레드(키보드·시리얼 읽기·keepalive 타이머)가 같이 쓰므로 잠금.
 ROS 없이 동작한다(테스트용).
@@ -41,23 +40,24 @@ def _file_sha(path):
 
 
 class SessionLog:
-    def __init__(self, runs_dir, meta=None, repo_root=None, now=None):
+    def __init__(self, log_dir, meta=None, repo_root=None, now=None):
         start = now or _dt.datetime.now()
-        name = start.strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(os.path.expanduser(runs_dir), name)
-        n = 1
-        while os.path.exists(path):          # 같은 초에 두 번 실행
+        self.dir = os.path.expanduser(log_dir)
+        os.makedirs(self.dir, exist_ok=True)
+        base = start.strftime("%Y%m%d_%H%M%S")
+        name, n = base, 1
+        while os.path.exists(os.path.join(self.dir, f"{name}_session.json")):   # 같은 초에 두 번 실행
             n += 1
-            path = os.path.join(os.path.expanduser(runs_dir), f"{name}_{n}")
-        os.makedirs(path)
-        self.dir = path
+            name = f"{base}-{n}"
+        self.name = name
+        self.prefix = os.path.join(self.dir, name)        # 파일 = prefix + "_drive_log.csv" 등
         self._t0 = time.monotonic()
         self.t0_epoch = time.time()     # t_s=0 인 순간의 벽시계 — 영상 프레임(벽시계 기록)을 t_s로 바꿀 때 쓴다
         self._lock = threading.Lock()
-        self._csv_f = open(os.path.join(path, "drive_log.csv"), "w", newline="", encoding="utf-8")
+        self._csv_f = open(self.path("drive_log.csv"), "w", newline="", encoding="utf-8")
         self._csv = csv.writer(self._csv_f, lineterminator="\n")   # 기본 \r\n이면 grep '…$'가 안 맞는다
         self._csv.writerow(["t_s", "kind", "value"])
-        self._raw_f = open(os.path.join(path, "serial_raw.log"), "w", encoding="utf-8")
+        self._raw_f = open(self.path("serial_raw.log"), "w", encoding="utf-8")
         self._closed = False
         # 요약용 집계
         self.counts = {"key": 0, "tx": 0, "pot": 0, "state": 0, "raw": 0}
@@ -67,7 +67,7 @@ class SessionLog:
         self.first_rx_s = None
         fw = os.path.join(repo_root, "firmware", "car_controller", "car_controller.ino") if repo_root else None
         self.meta = {
-            "session": os.path.basename(path),
+            "session": name,
             "start": start.isoformat(timespec="seconds"),
             "t0_epoch": round(self.t0_epoch, 6),
             "end": None,
@@ -77,6 +77,10 @@ class SessionLog:
             **(meta or {}),
         }
         self._write_json()
+
+    def path(self, suffix):
+        """이 세션 파일 경로: <log>/<세션>_<suffix>"""
+        return f"{self.prefix}_{suffix}"
 
     def t(self):
         return round(time.monotonic() - self._t0, 3)
@@ -152,7 +156,7 @@ class SessionLog:
                 self._raw_f.flush()
 
     def _write_json(self):
-        tmp = os.path.join(self.dir, "session.json.tmp")
+        tmp = self.path("session.json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.meta, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, os.path.join(self.dir, "session.json"))
+        os.replace(tmp, self.path("session.json"))

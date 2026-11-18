@@ -35,26 +35,28 @@ cd ~/car_drive_exp && git pull && ./run.sh
 
 시작할 때 `● 기록 시작: …`, 끝날 때 `● 기록 저장: …`과 요약(주행 시간·키 횟수·최고 |PWM|·조향 POT 범위·보드 응답)을 터미널에 띄운다.
 
+레포의 `log/` 폴더 하나에 **폴더를 나누지 않고** 파일 이름 앞에 세션 시각을 붙여 쌓는다.
+
 ```
-runs/<YYYYmmdd_HHMMSS>/
-  drive_log.csv    t_s,kind,value   kind = key(누른 키) · tx(보낸 명령 V<pwm>/L/R/F/G/S) · pot(조향 ADC) · state(0/1/2) · note
-  serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄)
-  session.json     시작·끝 시각, 종료 이유(q/ctrl+c/error), 포트, 설정, git 커밋, 펌웨어 해시, 요약, 영상 정보
-  video.mkv        (C920 있을 때) 카메라 영상
-  video_frames.csv frame,t_s
-  video_ffmpeg.log ffmpeg 오류 출력
+log/<YYYYmmdd_HHMMSS>_drive_log.csv     t_s,kind,value   kind = key(누른 키) · tx(보낸 명령 V<pwm>/L/R/F/G/S) · pot(조향 ADC) · state(0/1/2) · note
+log/<YYYYmmdd_HHMMSS>_serial_raw.log    보드에서 받은 원문 줄 (t_s<TAB>줄)
+log/<YYYYmmdd_HHMMSS>_session.json      시작·끝 시각, 종료 이유(q/ctrl+c/error), 포트, 설정, git 커밋, 펌웨어 해시, 요약, 영상 정보
+log/<YYYYmmdd_HHMMSS>_video.mkv         (C920 있을 때) 카메라 영상
+log/<YYYYmmdd_HHMMSS>_video_frames.csv  frame,t_s
+log/<YYYYmmdd_HHMMSS>_video_ffmpeg.log  ffmpeg 오류 출력
+log/last_build.txt                      마지막 colcon 빌드 출력
 ```
 
-- `t_s` = 세션 시작부터의 초. `runs/`는 git에 올라가지 않는다(노트북에만 남음).
-- **영상**: C920이 꽂혀 있으면 같은 폴더에 `video.mkv`(MJPEG 그대로 저장, 재인코딩 없음)와
-  `video_frames.csv`(frame,t_s — drive_log.csv와 같은 시간축)를 남긴다. t_s에는 카메라·USB 지연(수십 ms)이 들어 있다.
+- `t_s` = 세션 시작부터의 초. `log/`는 git에 올라가지 않는다(노트북에만 남음). 같은 초에 두 번 실행하면 `<시각>-2_…`.
+- 한 세션만 보기: `ls log/20261119_1530*`
+- **영상**: C920이 꽂혀 있으면 `<세션>_video.mkv`(MJPEG 그대로 저장, 재인코딩 없음)와
+  `<세션>_video_frames.csv`(frame,t_s — drive_log.csv와 같은 시간축)를 남긴다. t_s에는 카메라·USB 지연(수십 ms)이 들어 있다.
   - 카메라는 이름(C920)으로만 고른다. 없으면 노트북 내장 캠으로 바꾸지 않고 영상 없이 기록한다.
   - 다른 카메라: `-p camera:=/dev/video0` · 끄기: `-p camera:=none` · 해상도: `-p video_size:=640x480`
-  - 용량: 1280×720 MJPEG ≈ **분당 240 MB** — 오래 돌릴 땐 해상도를 낮추거나 runs/를 옮길 것
-  - 재생(노트북): `ffplay runs/<세션>/video.mkv` (스페이스 일시정지 · ←/→ 10초 이동 · q 닫기).
-    더블클릭으로 열려면 플레이어 설치: `sudo apt install -y mpv` (기본 앱 Totem은 설치돼 있지 않음)
+  - 용량: 1280×720 MJPEG ≈ **분당 240 MB** — 오래 돌릴 땐 해상도를 낮추거나 log/의 영상을 옮길 것
+  - 재생(노트북): 파일 탐색기에서 더블클릭(mpv) 또는 `mpv log/<세션>_video.mkv` (스페이스 일시정지 · ←/→ 5초 이동 · q 닫기). `ffplay`도 된다.
 - 연결 후 3초 동안 보드 응답(펌웨어 줄)이 없으면 **빨간 경고**를 띄우고 `note,no_board_reply`를 남긴다 — 펌웨어·baud 문제를 바로 알 수 있게.
-- 기록 끄기: `./run.sh -p record:=false` · 다른 위치: `CAR_DRIVE_RUNS=/path ./run.sh`
+- 기록 끄기: `./run.sh -p record:=false` · 다른 위치: `CAR_DRIVE_LOG=/path ./run.sh`
 
 ## 토픽
 
@@ -84,7 +86,7 @@ runs/<YYYYmmdd_HHMMSS>/
 run.sh  flash.sh  firmware/car_controller/
 src/car_drive/car_drive/
   wasd_drive.py   ROS 2 노드 (키보드 → 시리얼, 토픽 발행, 세션 기록)
-  session_log.py  세션 폴더·CSV·원문·session.json
+  session_log.py  세션 파일(log/<시각>_*)·CSV·원문·session.json
   video_recorder.py  ffmpeg 영상 기록 (C920 이름으로 찾기, 프레임 시각)
   drive.py        키 → 펌웨어 명령 (V0 → G 순서, 워치독 keepalive)
   serial_link.py  포트 찾기·연결·줄 해석
