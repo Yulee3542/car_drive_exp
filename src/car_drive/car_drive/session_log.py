@@ -54,7 +54,7 @@ class SessionLog:
         self._t0 = time.monotonic()
         self._lock = threading.Lock()
         self._csv_f = open(os.path.join(path, "drive_log.csv"), "w", newline="", encoding="utf-8")
-        self._csv = csv.writer(self._csv_f)
+        self._csv = csv.writer(self._csv_f, lineterminator="\n")   # 기본 \r\n이면 grep '…$'가 안 맞는다
         self._csv.writerow(["t_s", "kind", "value"])
         self._raw_f = open(os.path.join(path, "serial_raw.log"), "w", encoding="utf-8")
         self._closed = False
