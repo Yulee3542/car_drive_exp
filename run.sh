@@ -5,6 +5,15 @@
 #   ./run.sh --twin / --monitor                [더미] 트윈·모니터 자리 (기본 꺼짐)
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+# ROS 2는 시스템 파이썬(/usr/bin/python3) 전용 — conda가 켜져 있으면 PATH에서 빼고,
+# ~/.local에 pip로 깐 패키지(예: 최신 setuptools)가 colcon 빌드를 깨지 않게 사용자 영역을 무시한다.
+if [ -n "${CONDA_PREFIX:-}" ]; then
+  echo "[run] conda($CONDA_DEFAULT_ENV)가 켜져 있음 → 이 실행에서만 끔"
+  PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -e conda -e miniconda -e anaconda | paste -sd:)"
+  unset CONDA_PREFIX CONDA_DEFAULT_ENV PYTHONHOME
+fi
+export PYTHONNOUSERSITE=1
+
 ROS_SETUP="$(ls /opt/ros/*/setup.bash 2>/dev/null | sort | tail -1)"
 if [ -z "$ROS_SETUP" ]; then echo "ROS 2가 설치돼 있지 않음 (/opt/ros/*/setup.bash 없음)"; exit 1; fi
 # shellcheck disable=SC1090
