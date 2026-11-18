@@ -12,7 +12,7 @@ from car_drive.session_log import SessionLog  # noqa: E402
 
 def test_session_files_and_summary(tmp_path):
     log = SessionLog(str(tmp_path), meta={"port": "/dev/ttyACM0"}, now=dt.datetime(2026, 11, 19, 1, 2, 3))
-    assert log.name == "20261119_010203" and os.path.dirname(log.prefix) == str(tmp_path)
+    assert log.dir == os.path.join(str(tmp_path), "20261119_010203") and os.path.isdir(log.dir)
     started = json.load(open(log.path("session.json"), encoding="utf-8"))
     assert started["end"] is None and started["port"] == "/dev/ttyACM0"   # 시작하자마자 남는다
 
@@ -43,12 +43,11 @@ def test_session_files_and_summary(tmp_path):
     assert [r.split("\t")[1] for r in raw] == ["P 600", "P 640"]
 
 
-def test_same_second_gets_new_name(tmp_path):
+def test_same_second_gets_new_folder(tmp_path):
     t = dt.datetime(2026, 11, 19, 1, 2, 3)
     a = SessionLog(str(tmp_path), now=t)
     b = SessionLog(str(tmp_path), now=t)
-    assert a.name != b.name and b.name == "20261119_010203-2"
-    assert a.dir == b.dir == str(tmp_path)          # 폴더는 하나
+    assert a.dir != b.dir and b.name == "20261119_010203-2" and a.root == b.root == str(tmp_path)
     a.close(); b.close()
 
 

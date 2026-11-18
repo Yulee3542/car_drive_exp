@@ -1,8 +1,8 @@
-"""세션별 주행 로그 — 폴더를 나누지 않고 한 로그 폴더에, 파일 이름 앞에 세션 시각을 붙인다.
+"""세션별 주행 로그 — 로그 폴더 아래 세션마다 폴더 하나.
 
-  <log>/<YYYYmmdd_HHMMSS>_drive_log.csv    t_s,kind,value   (kind: key · tx · pot · state · note)
-  <log>/<YYYYmmdd_HHMMSS>_serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄) — 펌웨어가 바뀌어도 다시 해석
-  <log>/<YYYYmmdd_HHMMSS>_session.json     시작/끝 시각·포트·설정·git 커밋·펌웨어 해시·요약 (시작 때, 끝날 때 갱신)
+  <log>/<YYYYmmdd_HHMMSS>/drive_log.csv    t_s,kind,value   (kind: key · tx · pot · state · note)
+  <log>/<YYYYmmdd_HHMMSS>/serial_raw.log   보드에서 받은 원문 줄 (t_s<TAB>줄) — 펌웨어가 바뀌어도 다시 해석
+  <log>/<YYYYmmdd_HHMMSS>/session.json     시작/끝 시각·포트·설정·git 커밋·펌웨어 해시·요약 (시작 때, 끝날 때 갱신)
 
 t_s = 세션 시작부터의 초(단조 시계). 여러 스레드(키보드·시리얼 읽기·keepalive 타이머)가 같이 쓰므로 잠금.
 ROS 없이 동작한다(테스트용).
@@ -42,15 +42,19 @@ def _file_sha(path):
 class SessionLog:
     def __init__(self, log_dir, meta=None, repo_root=None, now=None):
         start = now or _dt.datetime.now()
-        self.dir = os.path.expanduser(log_dir)
-        os.makedirs(self.dir, exist_ok=True)
+        self.root = os.path.expanduser(log_dir)
+        os.makedirs(self.root, exist_ok=True)
         base = start.strftime("%Y%m%d_%H%M%S")
         name, n = base, 1
-        while os.path.exists(os.path.join(self.dir, f"{name}_session.json")):   # 같은 초에 두 번 실행
-            n += 1
-            name = f"{base}-{n}"
+        while True:
+            try:
+                os.mkdir(os.path.join(self.root, name))   # 같은 초에 두 번 실행하면 <시각>-2
+                break
+            except FileExistsError:
+                n += 1
+                name = f"{base}-{n}"
         self.name = name
-        self.prefix = os.path.join(self.dir, name)        # 파일 = prefix + "_drive_log.csv" 등
+        self.dir = os.path.join(self.root, name)          # 이 세션 폴더
         self._t0 = time.monotonic()
         self.t0_epoch = time.time()     # t_s=0 인 순간의 벽시계 — 영상 프레임(벽시계 기록)을 t_s로 바꿀 때 쓴다
         self._lock = threading.Lock()
@@ -79,8 +83,8 @@ class SessionLog:
         self._write_json()
 
     def path(self, suffix):
-        """이 세션 파일 경로: <log>/<세션>_<suffix>"""
-        return f"{self.prefix}_{suffix}"
+        """이 세션 파일 경로: <log>/<세션>/<suffix>"""
+        return os.path.join(self.dir, suffix)
 
     def t(self):
         return round(time.monotonic() - self._t0, 3)

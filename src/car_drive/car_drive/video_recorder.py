@@ -61,9 +61,9 @@ def frames_from_timestamps(ts_text, t0_epoch, start_epoch=0.0):
 
 
 class VideoRecorder:
-    def __init__(self, prefix, device, t0_epoch, size="1280x720", fps=30, input_format="mjpeg"):
-        """prefix = <log>/<세션> — 파일은 <세션>_video.mkv · _video_frames.csv · _video_ffmpeg.log"""
-        self.prefix, self.device, self.t0_epoch = prefix, device, t0_epoch
+    def __init__(self, out_dir, device, t0_epoch, size="1280x720", fps=30, input_format="mjpeg"):
+        """out_dir = 세션 폴더 — 파일은 video.mkv · video_frames.csv · video_ffmpeg.log"""
+        self.out_dir, self.device, self.t0_epoch = out_dir, device, t0_epoch
         self.info = {"device": device, "name": camera_name(device), "size": size, "fps_requested": fps,
                      "input_format": input_format, "file": os.path.basename(self._p("video.mkv")),
                      "frames_csv": os.path.basename(self._p("video_frames.csv"))}
@@ -78,7 +78,7 @@ class VideoRecorder:
         self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=self._err)
 
     def _p(self, suffix):
-        return f"{self.prefix}_{suffix}"
+        return os.path.join(self.out_dir, suffix)
 
     def error_if_dead(self):
         """ffmpeg가 이미 끝났으면 오류 문자열(카메라 사용 중·형식 미지원 등), 녹화 중이면 None. 막지 않는다."""
