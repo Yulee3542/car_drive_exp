@@ -31,12 +31,16 @@ class _PublishingLink:
         self._link, self._node = link, node
 
     def write(self, text):
-        self._link.write(text)
+        self._link.write(text)          # 차로 가는 명령이 먼저 — 토픽은 그다음, 실패해도 무시
         cmd = text.strip()
-        if cmd.startswith("V"):
-            self._node.pub_pwm.publish(Int16(data=int(cmd[1:])))
-        elif cmd in ("L", "R", "F"):
-            self._node.pub_steer.publish(String(data=cmd))
+        try:
+            if cmd.startswith("V"):
+                self._node.pub_pwm.publish(Int16(data=int(cmd[1:])))
+            elif cmd in ("L", "R", "F"):
+                self._node.pub_steer.publish(String(data=cmd))
+        except Exception:
+            # Ctrl+C면 ROS 컨텍스트가 먼저 닫혀 발행이 실패한다 — 이때도 정지 명령(V0·F·S)은 끝까지 보내야 한다
+            pass
 
 
 class WasdDrive(Node):
