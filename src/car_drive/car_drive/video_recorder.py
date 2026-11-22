@@ -75,7 +75,10 @@ class VideoRecorder:
                "-use_wallclock_as_timestamps", "1", "-i", device,
                "-map", "0:v", "-c:v", "copy", "-f", "matroska", self._p("video.mkv"),
                "-map", "0:v", "-c:v", "copy", "-f", "mkvtimestamp_v2", self._p(FFMPEG_TS)]
-        self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=self._err)
+        # start_new_session: 터미널 Ctrl+C(SIGINT)가 ffmpeg 에 직접 가지 않게 — stop()이 SIGINT 한 번만 보내야
+        # mkv 트레일러·타임스탬프 파일을 정상으로 닫는다 (두 번 받으면 "Immediate exit requested")
+        self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=self._err,
+                                      start_new_session=True)
 
     def _p(self, suffix):
         return os.path.join(self.out_dir, suffix)

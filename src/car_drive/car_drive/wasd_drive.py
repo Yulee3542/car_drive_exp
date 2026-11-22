@@ -4,13 +4,14 @@
   ros2 run car_drive wasd_drive --ros-args -p port:=/dev/ttyACM0 -p max_speed:=120
 
 실행할 때마다 세션 폴더 하나에 기록한다 (session_log.py, 끄려면 -p record:=false):
-  <log_dir>/<YYYYmmdd_HHMMSS>/ drive_log.csv · serial_raw.log · session.json (+ video.mkv · video_frames.csv)
+  <log_dir>/<YYYYmmdd_HHMMSS>/ drive_log.csv · encoder.csv · serial_raw.log · session.json (+ video.mkv · video_frames.csv)
   log_dir 기본 = $CAR_DRIVE_LOG (run.sh가 <레포>/log로 설정) 또는 ~/car_drive_exp/log
 
 발행:
   /car/pwm            Int16   지금 보내는 속도 명령(-255..255, 음수=후진)
   /car/steer_cmd      String  보낸 조향 명령 L/R/F
   /car/steering_pot   Int32   조향 POT ADC (펌웨어 P 줄, 약 20 Hz)
+  /car/wheel_encoder  Int32   뒷바퀴 엔코더 누적 카운트 (펌웨어 E 줄, 약 20 Hz, 1회전 = 80) — 보드 시각은 encoder.csv
   /car/state          Int8    펌웨어 상태 0 정지 / 1 전진 / 2 후진
 """
 import os
@@ -114,6 +115,7 @@ class WasdDrive(Node):
         self.pub_pwm = self.create_publisher(Int16, "/car/pwm", 10)
         self.pub_steer = self.create_publisher(String, "/car/steer_cmd", 10)
         self.pub_pot = self.create_publisher(Int32, "/car/steering_pot", 10)
+        self.pub_enc = self.create_publisher(Int32, "/car/wheel_encoder", 10)
         self.pub_state = self.create_publisher(Int8, "/car/state", 10)
 
         self._first_rx = threading.Event()
@@ -175,6 +177,8 @@ class WasdDrive(Node):
             try:
                 if kind == "pot":
                     self.pub_pot.publish(Int32(data=value))
+                elif kind == "enc":
+                    self.pub_enc.publish(Int32(data=value[0]))
                 else:
                     self.pub_state.publish(Int8(data=value))
             except Exception:
@@ -221,10 +225,20 @@ def _print_summary(meta):
     s = meta.get("summary", {})
     pot = f"{s.get('pot_min')}~{s.get('pot_max')}" if s.get("pot_samples") else "없음"
     reply = f"{s['first_board_reply_s']:.1f}초에 첫 응답" if s.get("first_board_reply_s") is not None else "응답 없음 ⚠"
+    if not s.get("enc_samples"):
+        enc = "없음 (펌웨어에 E 줄 없음 → ./flash.sh)"
+    elif s.get("enc_min") == s.get("enc_max"):
+        enc = f"{s['enc_samples']}개 · 카운트 변화 없음 (주행했는데 0이면 배선 CLK D33 · DT D32 확인)"
+    else:
+        enc = (f"{s['enc_samples']}개 · 순 {s['enc_net']:+d} 카운트 ({s['enc_net'] / 80:+.1f}회전) "
+               f"· 범위 {s['enc_min']}~{s['enc_max']}")
+    if s.get("enc_board_resets"):
+        enc += f" · 보드 리셋 {s['enc_board_resets']}번 ⚠"
     print(f"● 기록 저장: {meta['_dir']}/\n"
           f"  주행 {s.get('duration_s', 0):.0f}초 · 키 {s.get('keys')}번 · 최고 |PWM| {s.get('max_abs_pwm')} · "
           f"조향 POT {pot} ({s.get('pot_samples')}개) · 보드 {reply} · 종료 {meta.get('end_reason')}\n"
-          f"  파일: drive_log.csv · serial_raw.log · session.json", flush=True)
+          f"  바퀴 엔코더: {enc}\n"
+          f"  파일: drive_log.csv · encoder.csv · serial_raw.log · session.json", flush=True)
     v = meta.get("video")
     if not v:
         return

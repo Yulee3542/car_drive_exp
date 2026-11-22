@@ -26,13 +26,24 @@ def find_port():
 
 
 def parse_line(line):
-    """펌웨어 한 줄 → ("state", 0|1|2) · ("pot", adc) · None."""
+    """펌웨어 한 줄 → ("state", 0|1|2) · ("pot", adc) · ("enc", (count, board_ms)) · None.
+
+    E <count> <ms> = 뒷바퀴 엔코더(KY-040) 누적 카운트와 그걸 읽은 보드 millis().
+    """
     line = line.strip()
     if line in ("0", "1", "2"):
         return ("state", int(line))
     if line.startswith("P "):
         try:
             return ("pot", int(line[2:]))
+        except ValueError:
+            return None
+    if line.startswith("E "):
+        parts = line.split()
+        if len(parts) != 3:
+            return None          # 줄이 잘리거나 섞인 것 — 원문은 serial_raw.log에 남는다
+        try:
+            return ("enc", (int(parts[1]), int(parts[2])))
         except ValueError:
             return None
     return None
