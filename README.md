@@ -33,13 +33,14 @@ cd ~/car_drive_exp && git pull && ./run.sh
 
 ## 세션 기록 (실행할 때마다 자동)
 
-시작할 때 `● 기록 시작: …`, 끝날 때 `● 기록 저장: …`과 요약(주행 시간·키 횟수·최고 |PWM|·조향 POT 범위·보드 응답)을 터미널에 띄운다.
+시작할 때 `● 기록 시작: …`, 끝날 때 `● 기록 저장: …`과 요약(주행 시간·키 횟수·최고 |PWM|·조향 POT 범위·보드 응답·바퀴 엔코더 순 카운트)을 터미널에 띄운다.
 
 레포의 `log/` 아래에 **세션마다 폴더 하나**.
 
 ```
 log/<YYYYmmdd_HHMMSS>/
-  drive_log.csv     t_s,kind,value   kind = key(누른 키) · tx(보낸 명령 V<pwm>/L/R/F/G/S) · pot(조향 ADC) · state(0/1/2) · note
+  drive_log.csv     t_s,kind,value   kind = key(누른 키) · tx(보낸 명령 V<pwm>/L/R/F/G/S) · pot(조향 ADC) · enc(바퀴 엔코더 카운트) · state(0/1/2) · note
+  encoder.csv       t_s,board_ms,count   뒷바퀴 엔코더 (약 20 Hz). board_ms = 카운트를 읽은 보드 millis()
   serial_raw.log    보드에서 받은 원문 줄 (t_s<TAB>줄)
   session.json      시작·끝 시각, 종료 이유(q/ctrl+c/error), 포트, 설정, git 커밋, 펌웨어 해시, 요약, 영상 정보
   video.mkv         (C920 있을 때) 카메라 영상
@@ -65,13 +66,22 @@ log/last_build.txt  마지막 colcon 빌드 출력
 | `/car/pwm` | Int16 | 보내는 속도 명령 −255..255 (음수 = 후진) |
 | `/car/steer_cmd` | String | 보낸 조향 명령 L / R / F |
 | `/car/steering_pot` | Int32 | 조향 POT ADC (약 20 Hz) |
+| `/car/wheel_encoder` | Int32 | 뒷바퀴 엔코더 누적 카운트 (약 20 Hz, 1회전 = 80) |
 | `/car/state` | Int8 | 펌웨어 상태 0 정지 / 1 전진 / 2 후진 |
 
 ## 펌웨어
 
 `firmware/car_controller/car_controller.ino` = autodrive_skku `main`(a300036)의 `arduino/car_controller/car_controller.ino` 사본.
-9600 bps · `G` 주행 허용 · `S` 정지 · `V<-255..255>` 속도 · `L`/`R` 조향 펄스 · `F` 조향 정지 · 출력 `0/1/2` 상태 · `P <adc>`.
+9600 bps · `G` 주행 허용 · `S` 정지 · `V<-255..255>` 속도 · `L`/`R` 조향 펄스 · `F` 조향 정지 · 출력 `0/1/2` 상태 · `P <adc>` · `E <count> <ms>`.
 초음파 출력은 없다(필요하면 이 사본에 추가).
+
+**바퀴 엔코더 (KY-040, 뒷바퀴)** — 2026-11-21 추가
+- 배선: `CLK → D33` · `DT → D32` · `+ → 5V` · `GND → GND` (`SW`는 안 씀). 32·33은 인터럽트 핀이 아니라 펌웨어가 Timer0 1 kHz + loop 폴링으로 읽는다.
+- 4체배 디코딩 → KY-040(EC11 20클릭) **1회전 = 80 카운트**. 50 ms마다 `E <누적 카운트> <보드 millis>`.
+- 카운트는 포트를 열 때(보드 리셋) 0부터. **전진 = +** (2026-11-21 실차 확인, 펌웨어 `ENC_DIR = -1` 로 맞춤 — 엔코더를 반대로 다시 달면 이 값을 뒤집을 것).
+- 엔코더가 안 꽂혀 있어도 `E 0 …`이 계속 나온다(내부 풀업). 주행했는데 요약에 "카운트 변화 없음"이면 배선 확인.
+- 속도 = Δcount / Δboard_ms (encoder.csv). 바퀴 둘레 C [m]면 v = Δcount / 80 · C / Δt. 50 ms 창 하나로는 1카운트 차이가 크니 여러 줄을 묶어서 계산할 것.
+- 9600 bps 대역: P·상태·E 합쳐 약 550 B/s (한도 960 B/s).
 
 ## 더미 (기본 꺼짐)
 

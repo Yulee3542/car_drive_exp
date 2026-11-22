@@ -60,3 +60,11 @@ def test_parse_line():
     assert parse_line("1\r") == ("state", 1)
     assert parse_line("P x") is None
     assert parse_line("U 0 25") is None
+
+
+def test_parse_encoder_line():
+    assert parse_line("E 1234 56789\r") == ("enc", (1234, 56789))
+    assert parse_line("E -80 100") == ("enc", (-80, 100))      # 후진 / 반대 장착이면 음수
+    assert parse_line("E 12") is None                          # 잘린 줄
+    assert parse_line("E 1 2 3") is None
+    assert parse_line("E x 100") is None
